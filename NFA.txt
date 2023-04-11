@@ -1,0 +1,72 @@
+public class NFA {
+    private int numStates;
+    private Map<Integer, Map<Character, Set<Integer>>> transitions;
+    private int startState;
+    private Set<Integer> acceptStates;
+
+    public NFA() {
+        numStates = 0;
+        transitions = new HashMap<>();
+        startState = -1;
+        acceptStates = new HashSet<>();
+    }
+
+    public void addTransition(int fromState, char symbol, int toState) {
+        if (!transitions.containsKey(fromState)) {
+            transitions.put(fromState, new HashMap<>());
+        }
+        Map<Character, Set<Integer>> transitionsFromState = transitions.get(fromState);
+        if (!transitionsFromState.containsKey(symbol)) {
+            transitionsFromState.put(symbol, new HashSet<>());
+        }
+        Set<Integer> transitionsOnSymbol = transitionsFromState.get(symbol);
+        transitionsOnSymbol.add(toState);
+    }
+
+    public void setStartState(int state) {
+        startState = state;
+    }
+
+    public void addAcceptState(int state) {
+        acceptStates.add(state);
+    }
+
+    public Set<Integer> getAcceptStates() {
+        return acceptStates;
+    }
+
+    public Set<Integer> getAcceptStates(String input) {
+        Set<Integer> currentStates = new HashSet<>();
+        currentStates.add(startState);
+        epsilonClosure(currentStates);
+
+        for (int i = 0; i < input.length(); i++) {
+            Set<Integer> nextStates = new HashSet<>();
+            char symbol = input.charAt(i);
+            for (int state : currentStates) {
+                if (transitions.containsKey(state) && transitions.get(state).containsKey(symbol)) {
+                    nextStates.addAll(transitions.get(state).get(symbol));
+                }
+            }
+            epsilonClosure(nextStates);
+            currentStates = nextStates;
+        }
+
+        Set<Integer> acceptStates = new HashSet<>(currentStates);
+        acceptStates.retainAll(this.acceptStates);
+        return acceptStates;
+    }
+
+    public int addState() {
+        int state = acceptStates.size();
+        acceptStates.add(state);
+        transitions.put(state, new HashMap<>());
+        return state;
+    }
+
+    public void setAcceptState(int state) {
+        acceptStates.add(state);
+    }
+
+    public int getStartState() {
+        return startState;
