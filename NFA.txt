@@ -1,3 +1,10 @@
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.PrintWriter;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 public class NFA {
     private int numStates;
     private Map<Integer, Map<Character, Set<Integer>>> transitions;
@@ -70,3 +77,241 @@ public class NFA {
 
     public int getStartState() {
         return startState;
+    }
+
+    private Set<Integer> epsilonClosure(Set<Integer> states) {
+        Set<Integer> closure = new HashSet<>(states);
+        Stack<Integer> stack = new Stack<>();
+        stack.addAll(states);
+        while (!stack.isEmpty()) {
+            int state = stack.pop();
+            if (transitions.containsKey(state) && transitions.get(state).containsKey(null)) {
+                for (int nextState : transitions.get(state).get(null)) {
+                    if (!closure.contains(nextState)) {
+                        closure.add(nextState);
+                        stack.push(nextState);
+                    }
+                }
+            }
+        }
+        return closure;
+    }
+
+    public NFA concat(NFA nfa2) {
+        NFA result = new NFA();
+        result.numStates = numStates + nfa2.numStates;
+
+        // Копиране на прехода от първия NFA
+        for (int state : transitions.keySet()) {
+            Map<Character, Set<Integer>> transitionsFromState = transitions.get(state);
+            for (char symbol : transitionsFromState.keySet()) {
+                Set<Integer> transitionsOnSymbol = transitionsFromState.get(symbol);
+                for (int toState : transitionsOnSymbol) {
+                    result.addTransition(state, symbol, toState);
+                }
+            }
+        }
+
+        // Copy transitions from second NFA and add epsilon transitions from accept states of first NFA
+        for (int state : nfa2.transitions.keySet()) {
+            Map<Character, Set<Integer>> transitionsFromState = nfa2.transitions.get(state);
+            for (char symbol : transitionsFromState.keySet()) {
+                Set<Integer> transitionsOnSymbol = transitionsFromState.get(symbol);
+                for (int toState : transitionsOnSymbol) {
+                    result.addTransition(state + numStates, symbol, toState + numStates);
+                }
+            }
+        }
+
+       
+        for (int state : acceptStates) {
+            result.addTransition(state, '\0', nfa2.startState + numStates);
+        }
+
+        result.startState = startState;
+        result.acceptStates = nfa2.acceptStates.stream().map(state -> state + numStates).collect(Collectors.toSet());
+
+        return result;
+    }
+
+    public static NFA union(NFA nfa1, NFA nfa2) {
+        NFA result = new NFA();
+
+        //  NFA's към ново начало състояние
+        result.addTransition(0, '\0', nfa1.startState + 1);
+        result.addTransition(0, '\0', nfa2.startState + nfa1.numStates + 1);
+
+        //  Добавя преходите на първото NFA към резултата
+        for (int state : nfa1.transitions.keySet()) {
+            for (char symbol : nfa1.transitions.get(state).keySet()) {
+                for (int toState : nfa1.transitions.get(state).get(symbol)) {
+                    result.addTransition(state + 1, symbol, toState + 1);
+                }
+            }
+        }
+
+        // Добавя преходите на второото NFA към резултата
+        for (int state : nfa2.transitions.keySet()) {
+            for (char symbol : nfa2.transitions.get(state).keySet()) {
+                for (int toState : nfa2.transitions.get(state).get(symbol)) {
+                    result.addTransition(state + nfa1.numStates + 1, symbol, toState + nfa1.numStates + 1);
+                }
+            }
+        }
+
+        // Добавя крахни състояния на двете NFK към резултата 
+        for (Stream<Integer> integerStream : Arrays.asList(nfa1.acceptStates.stream().map(i -> i + 1), nfa2.acceptStates.stream().map(i -> i + nfa1.numStates + 1)))
+            result.addAcceptState(integerStream.reduce(0, (a, b) -> a + b));
+
+        result.numStates = nfa1.numStates + nfa2.numStates + 1;
+        result.startState = 0;
+
+        return result;
+    }
+
+    public void print() {
+        System.out.println("Number of states: " + numStates);
+        System.out.println("Start state: " + startState);
+        System.out.println("Accept states: " + acceptStates);
+        System.out.println("Transitions:");
+        for (Map.Entry<Integer, Map<Character, Set<Integer>>> entry : transitions.entrySet()) {
+            int fromState = entry.getKey();
+            for (Map.Entry<Character, Set<Integer>> transitionsOnSymbol : entry.getValue().entrySet()) {
+                char symbol = transitionsOnSymbol.getKey();
+                Set<Integer> toStates = transitionsOnSymbol.getValue();
+                for (int toState : toStates) {
+                    System.out.println("(" + fromState + ", " + symbol + ") -> " + toState);
+                }
+            }
+        }
+    }
+
+    public static NFA reg(String regex) {
+        Stack<NFA> stack = new Stack<>();
+        for (int i = 0; i < regex.length(); i++) {
+            char c = regex.charAt(i);
+            switch (c) {
+                case '(':
+                    stack.push(new NFA());
+                    break;
+                case '|':
+                    NFA nfa1 = stack.pop();
+                    NFA nfa2 = stack.pop();
+                    stack.push(NFA.union(nfa1, nfa2));
+                    break;
+                case ')':
+                    NFA nfa = stack.pop();
+                    if (i < regex.length() - 1 && regex.charAt(i + 1) == '*') {
+                        stack.push(nfa.star());
+                        i++;
+                    } else {
+                        stack.push(nfa);
+                    }
+                    break;
+                case '*':
+                    NFA topNFA = stack.pop();
+                    stack.push(topNFA.star());
+                    break;
+                default:
+                    stack.push(new NFA());
+                    break;
+            }
+        }
+        return stack.pop();
+    }
+
+    public NFA star() {
+        NFA result = new NFA();
+        result.setStartState(result.addState());
+        result.setAcceptState(result.addState());
+        result.addTransition(result.getStartState(), ' ', this.getStartState());
+        result.addTransition(this.getAcceptState(), ' ', result.getAcceptState());
+        result.addTransition(result.getStartState(), ' ', result.getAcceptState());
+        result.addTransition(this.getAcceptState(), ' ', this.getStartState());
+        return result;
+    }
+
+    private int getAcceptState() {
+        return acceptStates.iterator().next();
+    }
+
+    public boolean accepts(String input) {
+        Set<Integer> currentStates = epsilonClosure(Collections.singleton(startState));
+        for (char c : input.toCharArray()) {
+            Set<Integer> nextStates = new HashSet<>();
+            for (int state : currentStates) {
+                if (transitions.containsKey(state) && transitions.get(state).containsKey(c)) {
+                    nextStates.addAll(transitions.get(state).get(c));
+                }
+            }
+            currentStates = epsilonClosure(nextStates);
+        }
+        for (int state : currentStates) {
+            if (acceptStates.contains(state)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void load(String filename) throws FileNotFoundException {
+        try (Scanner scanner = new Scanner(new File(filename))) {
+            // чете състоянията
+            int numStates = scanner.nextInt();
+            for (int i = 0; i < numStates; i++) {
+                addState();
+            }
+            // чете преходите
+            int numTransitions = scanner.nextInt();
+            for (int i = 0; i < numTransitions; i++) {
+                int fromState = scanner.nextInt();
+                char symbol = scanner.next().charAt(0);
+                int toState = scanner.nextInt();
+                addTransition(fromState, symbol, toState);
+            }
+            // чете начално състояние
+            startState = scanner.nextInt();
+            // приети състояния
+            int numAcceptStates = scanner.nextInt();
+            for (int i = 0; i < numAcceptStates; i++) {
+                int acceptState = scanner.nextInt();
+                addAcceptState(acceptState);
+            }
+        }
+    }
+
+    public void save(String filename) throws FileNotFoundException {
+        try (PrintWriter writer = new PrintWriter(new File(filename))) {
+            // пише състояния
+            writer.println(acceptStates.size());
+            for (int state : acceptStates) {
+                writer.print(state + " ");
+            }
+            writer.println();
+            // write alphabet
+            writer.println();
+            // write transitions
+            int numTransitions = 0;
+            for (int fromState : transitions.keySet()) {
+                numTransitions += transitions.get(fromState).size();
+            }
+            writer.println(numTransitions);
+            for (int fromState : transitions.keySet()) {
+                Map<Character, Set<Integer>> toStates = transitions.get(fromState);
+                for (char symbol : toStates.keySet()) {
+                    for (int toState : toStates.get(symbol)) {
+                        writer.println(fromState + " " + symbol + " " + toState);
+                    }
+                }
+            }
+           
+            writer.println(startState);
+           
+            writer.println(acceptStates.size());
+            for (int acceptState : acceptStates) {
+                writer.print(acceptState + " ");
+            }
+            writer.println();
+        }
+    }
+}
